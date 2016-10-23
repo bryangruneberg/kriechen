@@ -5,37 +5,77 @@ namespace Kriechen;
 use \Spatie\Crawler\CrawlObserver;
 use \Spatie\Crawler\CrawlProfile;
 use \Spatie\Crawler\Url;
-use \Spatie\Crawler\ResponseInterface;
 
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 class KriechenCrawler implements CrawlObserver, CrawlProfile
 {
+  /**
+   * @var SymfonyStyle
+   */
   protected $io;
+
+  /**
+   * @var
+   */
   protected $host;
 
+  /**
+   * @var array
+   */
   protected $notCrawled = [];
-  protected $foreignHosts = [];
+
+  /**
+   * @var array
+   */
   protected $crawled = [];
 
-  protected $crawlExtentions = ['html','htm'];
-  protected $ignoredExtensions = [];
 
-  protected $H1Count = [];
+  /**
+   * @var KriechenPluginInterface[]
+   */
+  protected $plugins = [];
 
-  protected $pages = 0;
+  /**
+   * @var int
+   */
+  protected $crawlCount = 0;
 
+  /**
+   * @var
+   */
   protected $tmpFile = NULL;
 
+  public function __construct(SymfonyStyle $io, $host, $totalItems = 0)
+  {
+    $this->setIO($io);
+    $this->setHost($host);
+    $this->io->progressStart($totalItems);
+  }
+
+  /**
+   * @param \Symfony\Component\Console\Style\SymfonyStyle $io
+   */
   public function setIO(SymfonyStyle $io) 
   {
     $this->io = $io;
-    $this->io->progressStart(2000);
   }
 
+  /**
+   * @param $host
+   */
   public function setHost($host) 
   {
     $this->host = $host;
+  }
+
+  /**
+   * @param \Kriechen\KriechenPluginInterface $plugin
+   */
+  public function addPlugin(KriechenPluginInterface $plugin)
+  {
+    $plugin->initialize($this->io, $this->host);
+    $this->plugins[] = $plugin;
   }
 
   /**
@@ -47,29 +87,13 @@ class KriechenCrawler implements CrawlObserver, CrawlProfile
    */
   public function shouldCrawl(Url $url) 
   {
-    $ret = $url->host == $this->host;
+    $ret = TRUE;
 
-    if(!$ret && !in_array($url->host, $this->foreignHosts)) 
+    foreach($this->plugins as $plugin)
     {
-      $this->foreignHosts[] = $url->host;
-    }
-
-    if(preg_match('|/comment/|', $url->path)) {
-      $ret = FALSE;
-    }
-
-    if(preg_match('|^/en|', $url->path)) {
-      $ret = FALSE;
-    } 
-
-    if($ret && preg_match('/\.(\w{3,4})$/', (string) $url, $MAT))
-    {
-      if(!in_array($MAT[1], $this->crawlExtentions)) {
+      if(!$plugin->shouldCrawl($url))
+      {
         $ret = FALSE;
-
-        if(!in_array($MAT[1], $this->ignoredExtensions)) {
-          $this->ignoredExtensions[] = $MAT[1];
-        }
       }
     }
 
@@ -83,44 +107,37 @@ class KriechenCrawler implements CrawlObserver, CrawlProfile
    */
   public function willCrawl(Url $url) 
   {
-  } 
+    foreach($this->plugins as $plugin)
+    {
+      $plugin->willCrawl($url);
+    }
+  }
 
   /**
    * Called when the crawler has crawled the given url.
    *
-   * @param \Spatie\Crawler\Url       $url
+   * @param \Spatie\Crawler\Url $url
    * @param \Psr\Http\Message\ResponseInterface $response
+   * @return bool
    */
   public function hasBeenCrawled(Url $url, $response)
   {
-    $this->crawled[] = $url->__toString();
-
-    $c = (string) $response->getBody();
-    $response->getBody()->rewind();
-
-    $h1 = substr_count(strtolower($c), "<h1");
-    if(!isset($this->H1Count[$h1])) {
-      $this->H1Count[$h1] = [
-        'count' => 0,
-        'pages' => []
-      ];
+    foreach($this->plugins as $plugin)
+    {
+      $plugin->hasBeenCrawled($url, $response);
     }
 
-    $this->H1Count[$h1]['count']++;
-    $this->H1Count[$h1]['pages'][] = (string) $url;
-
-    //    $this->io->text("Crawled: " . $url . " (size: " . strlen($c) . ") [H1: ".$h1."]");
+    $this->crawled[] = (string) $url;
 
     $this->io->progressAdvance();
-    $this->pages++;
+    $this->crawlCount++;
 
-    if(($this->pages % 50) == 0)
+    if(($this->crawlCount % 50) == 0)
     {
-      ksort($this->H1Count);
       $this->printStats();
     }
 
-    if(($this->pages % 100) == 0)
+    if(($this->crawlCount % 100) == 0)
     {
       $this->io->note("Report @: " . $this->writeResults());
     }
@@ -131,13 +148,10 @@ class KriechenCrawler implements CrawlObserver, CrawlProfile
   public function printStats() 
   {
     $this->io->newLine(2);
-    $this->io->title('H1 Counts');
-    foreach($this->H1Count as $count => $countData) {
-      if(!$count) { $count = "no"; }
-      $this->io->text($count . ' H1s: ' . $countData['count']);
+    foreach($this->plugins as $plugin)
+    {
+      $plugin->printStats();
     }
-
-    $this->io->newLine(2);
   }
 
   public function writeResults()
@@ -150,22 +164,12 @@ class KriechenCrawler implements CrawlObserver, CrawlProfile
 
     $f = fopen($this->tmpFile, "w");
     fputs($f, "Results for " . $this->host ."\n\n");
-    foreach($this->H1Count as $count => $countData) {
-      if(!$count) { $count = "no"; }
-      fprintf($f, $count . " H1s: %d\n", $countData['count']);
-      sort($countData['pages']);
-      foreach($countData['pages'] as $page) {
-        fputs($f, " -- " . $page . "\n");
-      }
+
+    foreach($this->plugins as $plugin)
+    {
+      $plugin->writeResults($f);
     }
 
-    fputs($f, "\n\n======================================\n\n");
-
-    foreach($this->H1Count as $count => $countData) {
-      if(!$count) { $count = "no"; }
-      fprintf($f, $count . " H1s: %d\n", $countData['count']);
-      sort($countData['pages']);
-    }
     fclose($f);
 
     return $this->tmpFile;
@@ -176,7 +180,14 @@ class KriechenCrawler implements CrawlObserver, CrawlProfile
    */
   public function finishedCrawling()
   {
+    $this->io->newLine();
+
     $this->io->text("Done Crawling.");
     $this->io->text("Results in " . $this->writeResults());
+
+    foreach($this->plugins as $plugin)
+    {
+      $plugin->finishedCrawling();
+    }
   }
 }
