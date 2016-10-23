@@ -2,20 +2,19 @@
 
 namespace Kriechen\Command;
 
+use GuzzleHttp\RequestOptions;
 use Kriechen\KriechenCrawler;
-
 use Kriechen\KriechenIgnoreAllExtPlugin;
 use Kriechen\KriechenIgnorePathPatternPlugin;
 use Kriechen\KriechenStayOnHostPlugin;
 use Kriechen\KriechenTagCounterPlugin;
-
+use Spatie\Crawler\Crawler;
+use Spatie\Crawler\Url;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Spatie\Crawler\Crawler;
-use Spatie\Crawler\Url;
 
 class KriechenCommand extends Command
 {
@@ -52,7 +51,7 @@ class KriechenCommand extends Command
      ]
     ));
 
-    Crawler::create()
+    Crawler::create([RequestOptions::ALLOW_REDIRECTS => true])
       ->setCrawlObserver($kriechenCrawler)
       ->setCrawlProfile($kriechenCrawler)
       ->startCrawling($url);
