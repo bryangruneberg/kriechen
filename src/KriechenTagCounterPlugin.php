@@ -28,7 +28,7 @@ class KriechenTagCounterPlugin extends KriechenPluginBase {
    * KriechenPluginTagCounter constructor.
    * @param string $tag
    */
-  public function __construct(string $tag)
+  public function __construct($tag)
   {
     $this->tag = strtolower($tag);
   }
